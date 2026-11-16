@@ -9,6 +9,7 @@ A Python script to create a full local backup of a LiveJournal blog. The script 
 *   **Offline Content:** Downloads posts as `.html` files for offline reading.
 *   **Image Archiving:** Finds images within posts, downloads them locally, and updates the links in the HTML to point to the local files.
 *   **Comments Backup:** Fetches comments (using the mobile version of the site) and appends them to the bottom of the post file.
+*   **Year-by-Year Processing:** Sorts posts by date (oldest first), downloads a whole year before scanning the next.
 *   **Organized Structure:** Creates a main folder named after the journal, with subfolders for images and raw comment data.
 
 ## Requirements
@@ -31,8 +32,13 @@ A Python script to create a full local backup of a LiveJournal blog. The script 
     ```bash
     python SaveLj.py
     ```
-2.  Enter the LiveJournal username when prompted (e.g., `mi3ch`).
-3.  The script will verify the URL. If valid, it will create a folder named `{username}` and start downloading.
+2.  To access locked posts, create `cookies.txt` next to `SaveLj.py` and add one cookie per line using this format:
+    ```text
+    name: "values"
+    ```
+    The file is ignored by Git so your session cookies are not committed. If it is missing, the script asks whether to continue with access to public posts only; an empty file has the same effect.
+3.  Enter the LiveJournal username when prompted (e.g., `mi3ch`).
+4.  The script will verify the URL. If valid, it will create a folder named `{username}` and start downloading.
 
 ## Output Structure
 
@@ -57,6 +63,7 @@ Python-скрипт для создания полной локальной ко
 *   **Офлайн чтение:** Сохраняет посты в виде `.html` файлов.
 *   **Сохранение изображений:** Находит изображения в постах, скачивает их в локальную папку и обновляет ссылки в HTML, чтобы они работали без интернета.
 *   **Скачивание комментариев:** Загружает ветки комментариев (используя мобильную версию сайта) и добавляет их в конец файла с постом.
+*   **Обработка по годам:** Сортирует записи по дате (сначала старые), скачивает весь год перед сканированием следующего.
 *   **Структура папок:** Создает папку с именем журнала, внутри которой располагаются файлы и подпапки.
 
 ## Требования
@@ -79,6 +86,11 @@ Python-скрипт для создания полной локальной ко
     ```bash
     python SaveLj.py
     ```
+2.  Для доступа к закрытым записям создайте рядом с `SaveLj.py` файл `cookies.txt` и добавьте по одной cookie в строку в формате:
+    ```text
+    name: "values"
+    ```
+    Файл добавлен в список игнорируемых Git, поэтому cookie сессии не попадут в коммит. Если файла нет, скрипт спросит, продолжать ли работу только с открытыми постами; пустой файл дает тот же результат.
 3.  Введите имя пользователя ЖЖ, когда появится запрос (например: `tema` или `varlamov`).
 4.  Скрипт проверит URL. Если журнал существует, он создаст папку с именем этого журнала и начнет скачивание.
 
@@ -91,3 +103,11 @@ Python-скрипт для создания полной локальной ко
 ├── YYYY_MM_DD_ID_Название.html  # Файл поста с текстом и комментариями
 └── ...
 ```
+
+## Acknowledgements
+
+Thanks to [@isemaster](https://github.com/isemaster) for the initial version of this script.
+
+## Благодарности
+
+Спасибо [@isemaster](https://github.com/isemaster) за первоначальную версию скрипта.
