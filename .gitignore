@@ -1,7 +1,8 @@
-cookies.txt
+*.txt
 __pycache__
 *.html
 *.svg
 *.png
 *.jpg
+fix.py
 
