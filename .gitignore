@@ -1,5 +1,8 @@
 *.txt
+!requirements.txt
+*.log
 __pycache__
+.vscode
 *.html
 *.svg
 *.png

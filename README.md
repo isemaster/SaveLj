@@ -25,7 +25,7 @@ A Python script to create a full local backup of a LiveJournal blog. The script 
 1.  Clone the repository or download the script.
 2.  Install the required dependencies:
     ```bash
-    pip install requests beautifulsoup4
+    pip install -r requirements.txt
     ```
 
 ## Usage
@@ -37,8 +37,10 @@ A Python script to create a full local backup of a LiveJournal blog. The script 
 2.  Optionally, set the output root in `config.txt` next to `SaveLj.py`:
     ```text
     ROOT_DIR = D:\path\to\backup
+    LOG_FILE = SaveLj.log
+    LOG_LEVEL = ERROR
     ```
-    If `config.txt` is missing or has no `ROOT_DIR` setting, output goes to the `output` folder next to `SaveLj.py`. Relative paths in the config are resolved from that folder.
+    If `config.txt` is missing or has no `ROOT_DIR` setting, output goes to the `output` folder next to `SaveLj.py`. Relative `ROOT_DIR` values are resolved from the config folder. Logs are appended to `LOG_FILE` (default: `SaveLj.log` in the output root); relative log paths are resolved from that root. The default level is `ERROR`, which records unsuccessful operations. Set `LOG_LEVEL` to a standard Python logging level to change it.
 3.  To access locked posts, create `cookies.txt` next to `SaveLj.py` and add one cookie per line using this format:
     ```text
     name: "values"
@@ -100,7 +102,7 @@ Python-скрипт для создания полной локальной ко
 1.  Скачайте скрипт.
 2.  Установите необходимые библиотеки:
     ```bash
-    pip install requests beautifulsoup4
+    pip install -r requirements.txt
     ```
 
 ## Использование
@@ -112,8 +114,10 @@ Python-скрипт для создания полной локальной ко
 2.  При необходимости укажите корневую папку для сохранения в `config.txt` рядом с `SaveLj.py`:
     ```text
     ROOT_DIR = D:\path\to\backup
+    LOG_FILE = SaveLj.log
+    LOG_LEVEL = ERROR
     ```
-    Если файла `config.txt` нет или в нем не задан `ROOT_DIR`, результат сохраняется в папку `output` рядом с `SaveLj.py`. Относительные пути в конфигурации отсчитываются от этой папки.
+    Если файла `config.txt` нет или в нем не задан `ROOT_DIR`, результат сохраняется в папку `output` рядом с `SaveLj.py`. Относительный путь `ROOT_DIR` отсчитывается от папки с конфигурацией. Лог дописывается в файл `LOG_FILE` (по умолчанию `SaveLj.log` в корневой папке архива); относительный путь к логу отсчитывается от этой папки. Уровень по умолчанию — `ERROR`, в лог попадают неуспешные операции. Чтобы изменить его, укажите стандартный уровень логирования Python в `LOG_LEVEL`.
 3.  Для доступа к закрытым записям создайте рядом с `SaveLj.py` файл `cookies.txt` и добавьте по одной cookie в строку в формате:
     ```text
     name: "values"
@@ -149,7 +153,9 @@ ROOT_DIR/                   # По умолчанию ./output, если ROOT_DI
 ## Acknowledgements
 
 Thanks to [@isemaster](https://github.com/isemaster) for the initial version of this script.
+Thanks to [ati/ljsm](https://github.com/ati/ljsm/blob/master/ljsm.pl) for the ljsm.pl LiveJournal script.
 
 ## Благодарности
 
 Спасибо [@isemaster](https://github.com/isemaster) за первоначальную версию скрипта.
+Спасибо [ati/ljsm](https://github.com/ati/ljsm/blob/master/ljsm.pl) за скрипт ljsm.pl для LiveJournal.
