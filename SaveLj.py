@@ -10,6 +10,7 @@ Layout (ROOT_DIR from config.txt, default ./output):
   ROOT/<journal>/images/    all other images of the posts and comments
 
 Flags: --force (re-download existing posts)  --index-only (rebuild index.html)
+       --update URL (download one post; derive journal from URL)
        --mobile (force the mobile comment reader)  --debug (dump raw JSON/HTML to <journal>/debug/)
 """
 
@@ -100,6 +101,7 @@ JUNK_CLASS_TOKENS = {
     "slot",
     "qrcode",
 }
+DREAMWIDTH_REPLY_LABEL = re.compile(r"Ответов\s+на\s+Дриме\s*:", re.IGNORECASE)
 RUS_MONTHS = {
     "января": "01",
     "февраля": "02",
@@ -141,6 +143,16 @@ MONTH_NAMES = [
     "Ноябрь",
     "Декабрь",
 ]
+
+AUTHOR_IMG_SELECTORS = (
+    "dt.b-singlepost-author-userpic img",
+    "dt.aentry-head__userpic img",
+    "dl.b-singlepost-author img",
+    "dl.aentry-head__userpanel img",
+    ".p-author img",
+    ".h-card img",
+)
+
 # ============================================
 
 
@@ -184,16 +196,10 @@ def load_logging_settings():
                     continue
                 key = key.strip()
                 value = value.strip()
-                if (
-                    len(value) >= 2
-                    and value[0] == value[-1]
-                    and value[0] in ("'", '"')
-                ):
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
                     value = value[1:-1].strip()
                 if key == "LOG_FILE" and value:
-                    log_filename = os.path.expandvars(
-                        os.path.expanduser(value)
-                    )
+                    log_filename = os.path.expandvars(os.path.expanduser(value))
                 elif key == "LOG_LEVEL" and value:
                     log_level_name = value.upper()
     except FileNotFoundError:
@@ -350,6 +356,21 @@ def strip_junk(root):
     """Remove scripts, forms, like/share widgets, ad slots."""
     for t in root.find_all(JUNK_TAGS):
         t.decompose()
+    for text in list(root.find_all(string=DREAMWIDTH_REPLY_LABEL)):
+        ancestor = text.parent
+        removal_target = None
+        while ancestor is not None and ancestor is not root:
+            visible_text = " ".join(ancestor.get_text(" ", strip=True).split())
+            if DREAMWIDTH_REPLY_LABEL.fullmatch(visible_text) and (
+                ancestor.name in {"p", "div", "li", "td"} or ancestor.find("img")
+            ):
+                removal_target = ancestor
+                break
+            ancestor = ancestor.parent
+        if removal_target is not None:
+            removal_target.decompose()
+        else:
+            text.replace_with(DREAMWIDTH_REPLY_LABEL.sub("", str(text)))
     for t in root.find_all(class_=True):
         if getattr(t, "_decomposed", False):
             continue
@@ -409,6 +430,14 @@ class Assets:
             return "userpic"
         return "image"
 
+    @staticmethod
+    def is_unavailable_proxy(url):
+        parsed = urlparse(url)
+        return (
+            parsed.scheme.lower() == "https"
+            and (parsed.hostname or "").lower() == "imgprx.livejournal.net"
+        )
+
     def _target(self, url, kind, owner, post_id):
         """-> (directory, base name without extension)"""
         parts = [p for p in urlparse(url).path.split("/") if p]
@@ -433,6 +462,10 @@ class Assets:
         key = (url, owner if self.classify(url) == "userpic" else None)
         if key in self.cache:
             return self.cache[key]
+        if self.is_unavailable_proxy(url):
+            LOGGER.error("Treating LiveJournal proxy image as unavailable: %s", url)
+            self.cache[key] = None
+            return None
         kind = self.classify(url)
         folder, base, svc_ext = self._target(url, kind, owner or "_unknown", post_id)
         if stem and kind == "image":
@@ -484,7 +517,8 @@ class Assets:
             return None
         href = urljoin(base_url, parent["href"].strip())
         if (
-            href == abs_url
+            self.is_unavailable_proxy(abs_url)
+            or href == abs_url
             or self.classify(abs_url) != "image"
             or self.classify(href) != "image"
             or os.path.splitext(urlparse(href).path)[1].lower() not in IMG_EXTS
@@ -575,7 +609,10 @@ def scan_year(session, username, year, start_date, end_date):
         return []
     m = re.search(r'"has_remote"\s*:\s*(\d)', r.text)
     if m and m.group(1) == "0" and session.cookies:
-        LOGGER.error("LiveJournal did not accept the configured cookies for %s", username)
+        LOGGER.error(
+            f"LiveJournal did not accept the configured cookies for {username}"
+            f" ({year}): the request was treated as anonymous"
+        )
         print("   ⚠️ ЖЖ считает запрос анонимным: куки не приняты")
     soup = BeautifulSoup(r.text, "html.parser")
     days = get_day_urls(soup, username, year, start_date, end_date)
@@ -712,6 +749,19 @@ def order_comments(items):
     return [(c, c["level"]) for c in items]
 
 
+def comment_page_urls(soup, post_url, post_id):
+    """{номер страницы: абсолютный URL} из ссылок пейджера и <link rel=next>."""
+    found = {}
+    for tag in soup.find_all(["a", "link"], href=True):
+        href = tag["href"]
+        if f"/{post_id}.html" not in href:
+            continue
+        p = parse_qs(urlparse(href).query).get("page", [""])[0]
+        if p.isdigit():
+            found[int(p)] = urljoin(post_url, href.split("#")[0])
+    return found
+
+
 def collect_comments_desktop(
     session, journal, post_id, post_url, first_html, soup, debug_dir=None
 ):
@@ -719,12 +769,18 @@ def collect_comments_desktop(
     if not page_obj or "comments" not in page_obj:
         return None
     store, tried = {}, set()
+    skipped = {}
 
     def add(raw_list):
         for raw in raw_list:
             if "more" in raw and not raw.get("dtalkid"):
                 if raw.get("parent"):
                     pending.add(str(raw["parent"]))
+                continue
+            if raw.get("leafclass") == "screened":
+                cid = str(raw.get("dtalkid") or "")
+                if cid:
+                    skipped[cid] = str(raw.get("parent") or 0)
                 continue
             c = norm_comment(raw, journal)
             if not c["id"]:
@@ -742,27 +798,36 @@ def collect_comments_desktop(
 
     pending = set()
     add(page_obj["comments"])
-    pages = {1}
-    for a in soup.find_all("a", href=True):
-        if f"/{post_id}.html" in a["href"]:
-            q = parse_qs(urlparse(a["href"]).query)
-            if "page" in q and q["page"][0].isdigit():
-                pages.add(int(q["page"][0]))
-    for pg in sorted(pages - {1}):
+    seen_pages = {1}
+    queue = comment_page_urls(soup, post_url, post_id)
+    while True:
+        todo = [(p, u) for p, u in sorted(queue.items()) if p not in seen_pages]
+        if not todo:
+            break
+        pg, page_url = todo[0]
+        seen_pages.add(pg)
         random_delay(DELAYS["between_comments"])
-        r = fetch(session, f"{post_url}?noscroll#comments#page={pg}")
+        r = fetch(session, page_url)
         if r is None or r.status_code != 200:
             LOGGER.error(
-                "Could not load comment page %s for post %s in %s",
-                pg,
-                post_id,
-                journal,
+                "Could not load comment page %s for post %s in %s", pg, post_id, journal
             )
             print(f"      ⚠️ Страница комментариев {pg} недоступна")
             continue
+        for k, v in comment_page_urls(
+            BeautifulSoup(r.text, "html.parser"), post_url, post_id
+        ).items():
+            queue.setdefault(k, v)
         obj = extract_json_assignment(r.text, "Site.page")
         if obj and "comments" in obj:
             add(obj["comments"])
+            if debug_dir:
+                with open(
+                    os.path.join(debug_dir, f"{post_id}_page{pg}_Site.page.json"),
+                    "w",
+                    encoding="utf-8",
+                ) as fh:
+                    json.dump(obj, fh, ensure_ascii=False, indent=1)
     jr = journal.replace("-", "_")
     for _ in range(50):
         todo = sorted(pending - tried)
@@ -806,15 +871,45 @@ def collect_comments_desktop(
                     json.dump(data, fh, ensure_ascii=False, indent=1)
             add(data.get("comments", []))
     expected = page_obj.get("replycount")
-    if expected is not None and str(expected).isdigit() and int(expected) != len(store):
+    for c in store.values():
+        p = c["parent"]
+        while p in skipped:
+            p = skipped[p]
+        c["parent"] = p
+    orphans = {
+        c["parent"]
+        for c in store.values()
+        if c["parent"] != "0" and c["parent"] not in store
+    }
+    if orphans:
         LOGGER.error(
-            "Incomplete comments for post %s in %s: got %d of %s",
+            "Missing parent comments for post %s in %s: %s",
             post_id,
             journal,
-            len(store),
-            expected,
+            sorted(orphans)[:10],
         )
-        print(f"      ⚠️ Комментариев получено {len(store)} из {expected}")
+        print(f"      ⚠️ Не хватает комментариев-родителей: {len(orphans)}")
+    if expected is not None and str(expected).isdigit():
+        if len(store) < int(expected):
+            LOGGER.error(
+                "Incomplete comments for post %s in %s: got %d of %s",
+                post_id,
+                journal,
+                len(store),
+                expected,
+            )
+            print(f"      ⚠️ Комментариев получено {len(store)} из {expected}")
+        elif len(store) > int(expected):
+            deleted = sum(1 for c in store.values() if c["deleted"])
+            LOGGER.info(
+                "Comment count for post %s in %s: got %d, LJ replycount %s (deleted placeholders: %d)",
+                post_id,
+                journal,
+                len(store),
+                expected,
+                deleted,
+            )
+            print(f"      ⚠️ Комментариев получено {len(store)} из {expected}")
     if debug_dir:
         with open(
             os.path.join(debug_dir, f"{post_id}_Site.page.json"), "w", encoding="utf-8"
@@ -924,40 +1019,32 @@ def render_comments(ordered, journal, assets, post_id):
 
 # ---------------------------------------------------------------- posts
 def find_author(html_text, soup):
-    """-> dict(username, display, userpic): JSON страницы, затем DOM."""
-    res = {"username": "", "display": "", "userpic": ""}
+    """Сначала DOM (юзерпик ЭТОГО поста), JSON только как запасной вариант."""
+    res = {"username": "", "display": "", "userpic": "", "keyword": ""}
+    for sel in AUTHOR_IMG_SELECTORS:
+        for img in soup.select(sel):
+            src = (img.get("src") or img.get("data-src") or "").strip()
+            if src and USERPIC_HOST_RE.match(urlparse(src).netloc.lower()):
+                res["userpic"] = src
+                res["keyword"] = (img.get("title") or "").strip()
+                holder = img.find_parent(attrs={"lj:user": True})
+                res["username"] = holder.get("lj:user") if holder else ""
+                break
+        if res["userpic"]:
+            break
     for m in re.finditer(r"(Site\.[\w.]+)\s*=\s*(?=\{)", html_text):
         try:
             obj, _ = json.JSONDecoder().raw_decode(html_text[m.end() :])
         except ValueError:
             continue
         if isinstance(obj, dict) and "poster_userpic_url" in obj:
-            res.update(
-                username=obj.get("poster") or obj.get("journal") or "",
-                display=obj.get("poster_display_name") or "",
-                userpic=obj.get("poster_userpic_url") or "",
+            res["username"] = (
+                res["username"] or obj.get("poster") or obj.get("journal") or ""
             )
+            res["display"] = obj.get("poster_display_name") or ""
+            if not res["userpic"]:
+                res["userpic"] = obj.get("poster_userpic_url") or ""
             break
-    if not res["userpic"]:
-        sels = [
-            "dt.b-singlepost-author-userpic img",
-            "dt.aentry-head__userpic img",
-            "[class*=author-userpic] img",
-            "[class*=userpic] img",
-            ".p-author img",
-            ".h-card img",
-            ".author img",
-            ".vcard img",
-        ]
-        for sel in sels:
-            img = soup.select_one(sel)
-            if img and (img.get("src") or img.get("data-src")):
-                res["userpic"] = img.get("src") or img.get("data-src")
-                holder = img.find_parent(attrs={"lj:user": True})
-                res["username"] = res["username"] or (
-                    holder.get("lj:user") if holder else ""
-                )
-                break
     return res
 
 
@@ -971,7 +1058,11 @@ def parse_author(soup, raw_text, journal, post_url, assets, post_id):
     img_html = ""
     if info["userpic"]:
         wrap = soup.new_tag("div")
-        wrap.append(soup.new_tag("img", src=info["userpic"], alt=owner))
+        wrap.append(
+            soup.new_tag(
+                "img", src=info["userpic"], alt=owner, title=info.get("keyword")
+            )
+        )
         assets.rewrite_images(wrap, post_url, post_id, owner=owner)
         img_html = str(wrap.img)
     if not (img_html or name):
@@ -1013,9 +1104,36 @@ def get_post_title(raw_text, soup):
     return UNTITLED
 
 
-def process_posts(session, journal, posts, assets):
+def page_auth_state(raw):
+    m = re.search(r'\\?"has_remote\\?"\s*:\s*(\d)', raw)
+    if m:
+        return m.group(1) == "1"
+    m = re.search(r"Site\.remote\s*=\s*(null|\{)", raw)
+    if m:
+        return m.group(1) == "{"
+    return None
+
+
+def has_entry(raw, post_id):
+    return re.search(r'\\?"ditemid\\?"\s*:\s*%s\b' % post_id, raw) is not None
+
+
+def login_wall_reason(final_url, raw, post_id):
+    """Причина, по которой вместо поста пришла страница входа, или None."""
+    if re.search(r"/(login|identity/login)\b", urlparse(final_url).path):
+        return "перенаправление на страницу входа"
+    state = page_auth_state(raw)
+    if state is False:
+        return "куки не приняты (Site.remote пуст)"
+    if state is None and not has_entry(raw, post_id):
+        return "на странице нет данных поста (страница входа?)"
+    return None
+
+
+def process_posts(session, journal, posts, assets, force=False):
     out_dir = os.path.join(ROOT_FOLDER, journal)
     os.makedirs(out_dir, exist_ok=True)
+    processed_post_ids = []
     debug_dir = None
     if DEBUG:
         debug_dir = os.path.join(out_dir, "debug")
@@ -1027,10 +1145,10 @@ def process_posts(session, journal, posts, assets):
             LOGGER.error("Skipping post URL without a numeric ID: %s", url)
             continue
         post_id = m.group(1)
-        date_str = archive_date.replace("-", "_")
+        date_str = archive_date.replace("-", "_") if archive_date else ""
         print(f"\n[{i}/{len(posts)}] 📝 Пост #{post_id} ({url})")
         target = os.path.join(out_dir, f"{post_id}.html")
-        if os.path.exists(target) and not FORCE:
+        if os.path.exists(target) and not (FORCE or force):
             print("   ✅ Файл уже существует, пропускаем.")
             continue
         try:
@@ -1043,6 +1161,13 @@ def process_posts(session, journal, posts, assets):
             if r.encoding != "utf-8":
                 r.encoding = r.apparent_encoding
             raw_text = r.text
+            if not has_entry(raw_text, post_id):
+                reason = login_wall_reason(r.url, raw_text, post_id)
+                LOGGER.error(
+                    "Post %s for %s is not available: %s", post_id, journal, reason
+                )
+                print(f"   ❌ Пост {post_id} недоступен: {reason}")
+                continue
             if debug_dir:
                 with open(
                     os.path.join(debug_dir, f"{post_id}_post.html"),
@@ -1051,6 +1176,18 @@ def process_posts(session, journal, posts, assets):
                 ) as fh:
                     fh.write(raw_text)
             soup = BeautifulSoup(raw_text, "html.parser")
+            if not archive_date:
+                post_date = get_post_date(soup)
+                archive_date = (
+                    post_date.replace("_", "-")
+                    if post_date != "0000_00_00"
+                    else "0000-00-00"
+                )
+                date_str = archive_date.replace("-", "_")
+                if archive_date == "0000-00-00":
+                    LOGGER.error(
+                        "Could not determine date for post %s: %s", post_id, url
+                    )
             title = get_post_title(raw_text, soup)
 
             ordered = None
@@ -1114,11 +1251,13 @@ def process_posts(session, journal, posts, assets):
 </html>"""
             with open(target, "w", encoding="utf-8") as fh:
                 fh.write(final)
+            processed_post_ids.append(post_id)
             print(f"   ✅ Сохранено: {post_id}.html")
         except Exception as e:  # noqa: BLE001
             LOGGER.exception("Failed to process post %s for %s", post_id, journal)
             print(f"   ❌ Ошибка с постом: {e}")
         random_delay(DELAYS["between_posts"])
+    return processed_post_ids
 
 
 # ---------------------------------------------------------------- index
@@ -1166,34 +1305,68 @@ def update_navigation(out_dir, posts):
     changed = 0
     for i, p in enumerate(dated):
         path = os.path.join(out_dir, f"{p['id']}.html")
-        with open(path, encoding="utf-8") as fh:
-            text = fh.read()
         block = nav_html(
             dated[i - 1] if i else None, dated[i + 1] if i + 1 < len(dated) else None
         )
-        if NAV_RE.search(text):
-            new = NAV_RE.sub(lambda m: block, text)
-        else:
-            new = text.replace(
-                '<div class="container">', '<div class="container">\n' + block, 1
-            )
-            new = re.sub(
-                r"(\s*</div>\s*</body>)",
-                lambda m: "\n" + block + m.group(1),
-                new,
-                count=1,
-            )
-        if new != text:
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(new)
+        if set_post_navigation(path, block):
             changed += 1
     return changed
+
+
+def set_post_navigation(path, block):
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    if NAV_RE.search(text):
+        new = NAV_RE.sub(lambda m: block, text)
+    else:
+        new = text.replace(
+            '<div class="container">', '<div class="container">\n' + block, 1
+        )
+        new = re.sub(
+            r"(\s*</div>\s*</body>)",
+            lambda m: "\n" + block + m.group(1),
+            new,
+            count=1,
+        )
+    if new == text:
+        return False
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(new)
+    return True
+
+
+def update_post_navigation(out_dir, post_id):
+    posts = [
+        read_post_meta(os.path.join(out_dir, filename))
+        for filename in os.listdir(out_dir)
+        if filename.endswith(".html") and filename[:-5].isdigit()
+    ]
+    dated = sorted(
+        (post for post in posts if post["date"]),
+        key=lambda post: (post["date"], int(post["id"])),
+    )
+    post_index = next(
+        (index for index, post in enumerate(dated) if post["id"] == post_id), None
+    )
+    if post_index is None:
+        LOGGER.error(
+            "Cannot add navigation for post %s: post date is unavailable", post_id
+        )
+        return False
+
+    block = nav_html(
+        dated[post_index - 1] if post_index else None,
+        dated[post_index + 1] if post_index + 1 < len(dated) else None,
+    )
+    return set_post_navigation(os.path.join(out_dir, f"{post_id}.html"), block)
 
 
 def build_index(journal):
     out_dir = os.path.join(ROOT_FOLDER, journal)
     if not os.path.isdir(out_dir):
-        LOGGER.error("Cannot build archive index; journal folder is missing: %s", out_dir)
+        LOGGER.error(
+            "Cannot build archive index; journal folder is missing: %s", out_dir
+        )
         print(f"Папка {out_dir} не найдена.")
         return
     posts = [
@@ -1266,7 +1439,9 @@ def ensure_css():
         if os.path.exists(src):
             shutil.copy(src, css_path)
         else:
-            LOGGER.error("CSS stylesheet not found at %s; archive styling is unavailable", src)
+            LOGGER.error(
+                "CSS stylesheet not found at %s; archive styling is unavailable", src
+            )
             print(f"⚠️ Файл стилей не найден: {src}")
             print("   ❌ CSS не создан, внешний вид может быть нарушен.")
             print(
@@ -1290,15 +1465,67 @@ def ask_date(prompt, default_month, last_day):
     return date(y, mo, d)
 
 
+def parse_update_url(url):
+    try:
+        parsed = urlparse(url)
+    except ValueError as error:
+        raise ValueError("Invalid post URL.") from error
+
+    host = (parsed.hostname or "").lower()
+    username_match = re.fullmatch(r"([a-z0-9][a-z0-9_-]*)\.livejournal\.com", host)
+    post_match = re.fullmatch(r"/(\d+)\.html", parsed.path)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc.lower() != host
+        or parsed.query
+        or parsed.fragment
+        or not username_match
+        or not post_match
+    ):
+        raise ValueError(
+            "Expected a post URL in the form "
+            "https://<username>.livejournal.com/<post_id>.html"
+        )
+
+    username = username_match.group(1)
+    post_id = post_match.group(1)
+    return username, post_id, f"https://{host}/{post_id}.html"
+
+
+def parse_update_option(arguments):
+    positions = [index for index, value in enumerate(arguments) if value == "--update"]
+    if not positions:
+        return None
+    if len(positions) > 1:
+        raise ValueError("--update may only be specified once.")
+    if positions[0] + 1 >= len(arguments):
+        raise ValueError("--update requires a post URL.")
+    if "--index-only" in arguments:
+        raise ValueError("--update cannot be combined with --index-only.")
+    return parse_update_url(arguments[positions[0] + 1])
+
+
 def main():
     if sys.platform == "win32":
         os.system("chcp 65001 > nul")
     print("=" * 60 + "\n📚 СКАЧИВАНИЕ LIVEJOURNAL\n" + "=" * 60)
-    print("\n📝 Введите название журнала (username):")
-    journal = input(" > ").strip()
-    if not journal:
-        LOGGER.error("Journal username was empty")
-        sys.exit("❌ Пустое имя.")
+    try:
+        update_request = parse_update_option(sys.argv[1:])
+    except ValueError as error:
+        LOGGER.error("Invalid --update request: %s", error)
+        sys.exit(f"❌ {error}")
+
+    update_url = None
+    if update_request:
+        journal, post_id, update_url = update_request
+        print(f"\n📝 Обновляю запись #{post_id} из журнала {journal}.")
+    else:
+        print("\n📝 Введите название журнала (username):")
+        journal = input(" > ").strip()
+        if not journal:
+            LOGGER.error("Journal username was empty")
+            sys.exit("❌ Пустое имя.")
+
     ensure_css()
     if INDEX_ONLY:
         build_index(journal)
@@ -1307,6 +1534,15 @@ def main():
     session.headers.update(HEADERS)
     for k, v in load_cookies_or_confirm().items():
         session.cookies.set(k, v, domain=".livejournal.com")
+    assets = Assets(session, ROOT_FOLDER, journal)
+    if update_url:
+        updated_post_ids = process_posts(
+            session, journal, [(update_url, None)], assets, force=True
+        )
+        if post_id in updated_post_ids:
+            update_post_navigation(os.path.join(ROOT_FOLDER, journal), post_id)
+        return
+
     try:
         start = ask_date(
             "\n📅 НАЧАЛЬНАЯ ДАТА (YYYY, YYYY-MM или YYYY-MM-DD):", 1, False
@@ -1317,7 +1553,6 @@ def main():
         sys.exit("❌ Введите корректную дату.")
     if start > end:
         start, end = end, start
-    assets = Assets(session, ROOT_FOLDER, journal)
     total = 0
     try:
         for year in range(start.year, end.year + 1):

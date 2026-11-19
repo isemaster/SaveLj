@@ -49,6 +49,14 @@ A Python script to create a full local backup of a LiveJournal blog. The script 
 4.  Enter the LiveJournal username when prompted (e.g., `mi3ch`).
 5.  The script will verify the URL. If valid, it will create the output folders and start downloading.
 
+To download or refresh just one post without scanning the archive, run:
+
+```bash
+python SaveLj.py --update https://username.livejournal.com/12345.html
+```
+
+The journal username is read from the URL. The post file is replaced if it already exists, and only that post's previous/next navigation links are refreshed from posts already in the local archive. The archive index is not rebuilt.
+
 ## Output Structure
 
 ```text
@@ -125,6 +133,14 @@ Python-скрипт для создания полной локальной ко
     Файл добавлен в список игнорируемых Git, поэтому cookie сессии не попадут в коммит. Если файла нет, скрипт спросит, продолжать ли работу только с открытыми постами; пустой файл дает тот же результат.
 4.  Введите имя пользователя ЖЖ, когда появится запрос (например: `tema` или `varlamov`).
 5.  Скрипт проверит URL. Если журнал существует, он создаст папки для сохранения и начнет скачивание.
+
+Чтобы скачать или обновить только одну запись без сканирования архива, запустите:
+
+```bash
+python SaveLj.py --update https://username.livejournal.com/12345.html
+```
+
+Имя журнала определяется по URL. Если файл записи уже существует, он будет перезаписан; ссылки на предыдущую и следующую записи обновятся только в этом файле по данным локального архива. Индекс архива не перестраивается.
 
 ## Структура выходных данных
 
