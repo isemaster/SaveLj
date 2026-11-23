@@ -8,8 +8,11 @@ A Python script to create a full local backup of a LiveJournal blog. The script 
 *   **Validation:** Checks if the journal exists before starting. If the journal is not found (404), the script terminates with the message "нет такого журнал" (no such journal).
 *   **Offline Content:** Downloads posts as `.html` files for offline reading.
 *   **Image Archiving:** Finds images within posts, downloads them locally, and updates the links in the HTML to point to the local files.
-*   **Comments Backup:** Fetches comments (using the mobile version of the site) and appends them to the bottom of the post file.
-*   **Organized Structure:** Creates a main folder named after the journal, with subfolders for images and raw comment data.
+*   **Author Details:** Keeps the post author's name and userpic beside the title, and saves post and comment userpics locally.
+*   **Comments Backup:** Saves comments with each post, including commenter details and locally archived userpics.
+*   **Year-by-Year Processing:** Sorts posts by date (oldest first), downloads a whole year before scanning the next.
+*   **Archive Index:** Generates an `index.html` with posts grouped by year and month.
+*   **Organized Structure:** Stores the journal archive and shared assets under the configured root folder.
 
 ## Requirements
 
@@ -22,7 +25,7 @@ A Python script to create a full local backup of a LiveJournal blog. The script 
 1.  Clone the repository or download the script.
 2.  Install the required dependencies:
     ```bash
-    pip install requests beautifulsoup4
+    pip install -r requirements.txt
     ```
 
 ## Usage
@@ -31,18 +34,52 @@ A Python script to create a full local backup of a LiveJournal blog. The script 
     ```bash
     python SaveLj.py
     ```
-2.  Enter the LiveJournal username when prompted (e.g., `mi3ch`).
-3.  The script will verify the URL. If valid, it will create a folder named `{username}` and start downloading.
+2.  Optionally, set the output root in `config.txt` next to `SaveLj.py`:
+    ```text
+    ROOT_DIR = D:\path\to\backup
+    LOG_FILE = SaveLj.log
+    LOG_LEVEL = ERROR
+    ```
+    If `config.txt` is missing or has no `ROOT_DIR` setting, output goes to the `output` folder next to `SaveLj.py`. Relative `ROOT_DIR` values are resolved from the config folder. Logs are appended to `LOG_FILE` (default: `SaveLj.log` in the output root); relative log paths are resolved from that root. The default level is `ERROR`, which records unsuccessful operations. Set `LOG_LEVEL` to a standard Python logging level to change it.
+3.  To access locked posts, create `cookies.txt` next to `SaveLj.py` and add one cookie per line using this format:
+    ```text
+    name: "values"
+    ```
+    The file is ignored by Git so your session cookies are not committed. If it is missing, the script asks whether to continue with access to public posts only; an empty file has the same effect.
+4.  Enter the LiveJournal username when prompted (e.g., `mi3ch`).
+5.  The script will verify the URL. If valid, it will create the output folders and start downloading.
+
+To download or refresh just one post without scanning the archive, run:
+
+```bash
+python SaveLj.py --update https://username.livejournal.com/12345.html
+```
+
+The journal username is read from the URL. The post file is replaced if it already exists, and only that post's previous/next navigation links are refreshed from posts already in the local archive. The archive index is not rebuilt.
 
 ## Output Structure
 
 ```text
-username/
-├── images/               # All downloaded images from posts
-├── comments_raw/         # Raw HTML files of comments (for debugging/backup)
-├── YYYY_MM_DD_ID_Title.html  # The post with embedded content
-└── ...
+ROOT_DIR/                   # Defaults to ./output when ROOT_DIR is not configured
+├── css/
+│   └── lj.css              # Styles shared by posts and the archive index
+├── lj_icons/
+│   └── ...                 # Downloaded LiveJournal service icons and missing.svg
+├── userpics/
+│   └── username/
+│       └── ...             # Shared userpics used by post and comment authors
+└── journal_username/
+    ├── index.html          # Archive index grouped by year and month
+    ├── 12345.html          # One post per file; comments are included in the page
+    ├── images/
+    │   └── ...             # Images used in posts and comments
+    └── debug/              # Optional raw response files when run with --debug
 ```
+
+`ROOT_DIR` is the path configured in `config.txt`. The `css`, `lj_icons`, and
+`userpics` folders are shared between journal archives; each journal's posts,
+index, and other images are kept in its own folder. The `debug` folder is
+created only when the script is run with `--debug`.
 
 ------------------------------------
 
@@ -56,8 +93,11 @@ Python-скрипт для создания полной локальной ко
 *   **Проверка существования:** Перед началом работы проверяет доступность журнала. Если журнал не найден (ошибка 404), скрипт завершает работу с сообщением «нет такого журнал».
 *   **Офлайн чтение:** Сохраняет посты в виде `.html` файлов.
 *   **Сохранение изображений:** Находит изображения в постах, скачивает их в локальную папку и обновляет ссылки в HTML, чтобы они работали без интернета.
-*   **Скачивание комментариев:** Загружает ветки комментариев (используя мобильную версию сайта) и добавляет их в конец файла с постом.
-*   **Структура папок:** Создает папку с именем журнала, внутри которой располагаются файлы и подпапки.
+*   **Данные автора:** Сохраняет имя автора и userpic рядом с заголовком записи; userpic авторов комментариев также сохраняются локально.
+*   **Скачивание комментариев:** Сохраняет комментарии внутри файла записи вместе с данными авторов.
+*   **Обработка по годам:** Сортирует записи по дате (сначала старые), скачивает весь год перед сканированием следующего.
+*   **Индекс архива:** Создает `index.html` со списком записей, сгруппированных по годам и месяцам.
+*   **Структура папок:** Сохраняет архив журнала и общие ресурсы в корневой папке из конфигурации.
 
 ## Требования
 
@@ -70,7 +110,7 @@ Python-скрипт для создания полной локальной ко
 1.  Скачайте скрипт.
 2.  Установите необходимые библиотеки:
     ```bash
-    pip install requests beautifulsoup4
+    pip install -r requirements.txt
     ```
 
 ## Использование
@@ -79,15 +119,59 @@ Python-скрипт для создания полной локальной ко
     ```bash
     python SaveLj.py
     ```
-3.  Введите имя пользователя ЖЖ, когда появится запрос (например: `tema` или `varlamov`).
-4.  Скрипт проверит URL. Если журнал существует, он создаст папку с именем этого журнала и начнет скачивание.
+2.  При необходимости укажите корневую папку для сохранения в `config.txt` рядом с `SaveLj.py`:
+    ```text
+    ROOT_DIR = D:\path\to\backup
+    LOG_FILE = SaveLj.log
+    LOG_LEVEL = ERROR
+    ```
+    Если файла `config.txt` нет или в нем не задан `ROOT_DIR`, результат сохраняется в папку `output` рядом с `SaveLj.py`. Относительный путь `ROOT_DIR` отсчитывается от папки с конфигурацией. Лог дописывается в файл `LOG_FILE` (по умолчанию `SaveLj.log` в корневой папке архива); относительный путь к логу отсчитывается от этой папки. Уровень по умолчанию — `ERROR`, в лог попадают неуспешные операции. Чтобы изменить его, укажите стандартный уровень логирования Python в `LOG_LEVEL`.
+3.  Для доступа к закрытым записям создайте рядом с `SaveLj.py` файл `cookies.txt` и добавьте по одной cookie в строку в формате:
+    ```text
+    name: "values"
+    ```
+    Файл добавлен в список игнорируемых Git, поэтому cookie сессии не попадут в коммит. Если файла нет, скрипт спросит, продолжать ли работу только с открытыми постами; пустой файл дает тот же результат.
+4.  Введите имя пользователя ЖЖ, когда появится запрос (например: `tema` или `varlamov`).
+5.  Скрипт проверит URL. Если журнал существует, он создаст папки для сохранения и начнет скачивание.
+
+Чтобы скачать или обновить только одну запись без сканирования архива, запустите:
+
+```bash
+python SaveLj.py --update https://username.livejournal.com/12345.html
+```
+
+Имя журнала определяется по URL. Если файл записи уже существует, он будет перезаписан; ссылки на предыдущую и следующую записи обновятся только в этом файле по данным локального архива. Индекс архива не перестраивается.
 
 ## Структура выходных данных
 
 ```text
-имя_журнала/
-├── images/               # Все скачанные картинки из постов
-├── comments_raw/         # "Сырые" HTML файлы комментариев (техническая папка)
-├── YYYY_MM_DD_ID_Название.html  # Файл поста с текстом и комментариями
-└── ...
+ROOT_DIR/                   # По умолчанию ./output, если ROOT_DIR не задан
+├── css/
+│   └── lj.css              # Общие стили записей и индекса архива
+├── lj_icons/
+│   └── ...                 # Служебные иконки LiveJournal и missing.svg
+├── userpics/
+│   └── имя_пользователя/
+│       └── ...             # Общие userpic авторов записей и комментариев
+└── имя_журнала/
+    ├── index.html          # Индекс архива по годам и месяцам
+    ├── 12345.html          # Одна запись в файле, комментарии включены в страницу
+    ├── images/
+    │   └── ...             # Изображения записей и комментариев
+    └── debug/              # Сырые ответы; создается только с параметром --debug
 ```
+
+`ROOT_DIR` — путь из `config.txt`. Каталоги `css`, `lj_icons` и `userpics`
+общие для всех архивов; записи, индекс и остальные изображения каждого журнала
+хранятся в его отдельной папке. Каталог `debug` появляется только при запуске
+с параметром `--debug`.
+
+## Acknowledgements
+
+Thanks to [@isemaster](https://github.com/isemaster) for the initial version of this script.
+Thanks to [ati/ljsm](https://github.com/ati/ljsm/blob/master/ljsm.pl) for the ljsm.pl LiveJournal script.
+
+## Благодарности
+
+Спасибо [@isemaster](https://github.com/isemaster) за первоначальную версию скрипта.
+Спасибо [ati/ljsm](https://github.com/ati/ljsm/blob/master/ljsm.pl) за скрипт ljsm.pl для LiveJournal.

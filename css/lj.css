@@ -1,0 +1,35 @@
+/* SaveLj v2 */
+body { font-family: 'Verdana', sans-serif; max-width: 900px; margin: auto; padding: 20px; background: #f4f4f4; }
+.container { background: #fff; padding: 30px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+img { max-width: 100%; height: auto; border-radius: 3px; }
+a { color: #0066cc; text-decoration: none; }
+.meta { color: #777; font-size: 0.9em; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+.nav { margin-bottom: 10px; font-size: 0.9em; }
+.post-heading::after { content: ""; display: block; clear: both; }
+.post-author { float: left; margin: 0 16px 10px 0; max-width: 110px; text-align: center; }
+.post-author img { width: auto; height: 100px; max-width: 87px; object-fit: cover; margin: 0 auto 6px; }
+.post-author-name { display: block; overflow-wrap: anywhere; font-size: 0.85em; }
+span.ljuser { display: inline !important; white-space: nowrap; }
+span.ljuser img.i-ljuser-userhead { width: 17px !important; height: 17px !important; vertical-align: middle; margin: 0 3px 0 0; }
+.aentry-tags a + a::before { content: " | "; color: #888; white-space: pre; }
+img.img-missing { width: 50px; height: 50px; margin: 2px; }
+.comments-section { margin-top: 40px; border-top: 2px solid #eee; padding-top: 16px; }
+.comment { margin: 0 0 14px 0; padding-left: 12px; border-left: 3px solid #e0e0e0; overflow: hidden; }
+.comment-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.comment-userpic { width: 50px; height: 50px; object-fit: cover; border-radius: 3px; margin: 0; flex: none; }
+.comment-author { font-weight: bold; }
+.comment-date { color: #777; font-size: 0.85em; margin-left: 8px; }
+.comment-subject { display: block; font-weight: bold; }
+.comment-body { overflow-wrap: anywhere; }
+.comment-deleted { color: #999; font-style: italic; }
+.index-page details.year > summary { font-size: 1.3em; font-weight: bold; cursor: pointer; margin-top: 12px; }
+.index-page details.month { margin-left: 22px; }
+.index-page details.month > summary { cursor: pointer; font-weight: bold; margin-top: 6px; }
+.index-page ul { list-style: none; padding-left: 16px; margin: 4px 0 8px; }
+.index-page .d { display: inline-block; width: 1.8em; color: #888; text-align: right; }
+.index-page .n, .index-page .c { color: #888; font-weight: normal; font-size: 0.85em; }
+
+.post-nav { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 12px 0; font-size: 0.55em; }
+.post-nav a, .post-nav .disabled { padding: 4px 10px; border: 1px solid #ddd; border-radius: 4px; }
+.post-nav .disabled { color: #bbb; border-color: #eee; }
+.post-nav .up { border: none; }
